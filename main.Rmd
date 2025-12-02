@@ -44,7 +44,7 @@ CURRENT_DIR <- dirname(rstudioapi::getActiveDocumentContext()$path)
 ```{r, echo=FALSE}
 
 pat_raw <- read.csv(
-  "data/통합_품질.csv",
+  "data/산공_IPC.csv",
   fileEncoding     = "UTF-8",
   stringsAsFactors = FALSE
 )
@@ -192,30 +192,47 @@ stm_model <- stm(
 )
 ```
 
-# 6. Plot STM
+# 6. Plots
+
+## 6.1. STM Summary
 
 ```{r echo=FALSE}
 plot(stm_model, type= "summary", text.cex = 0.8)
 labelTopics(stm_model, topics = 1: K_final, n=10)
 ```
 
+## 6.2. STM topicCorr Heatmap
+
 ```{r echo=FALSE}
-
-stm_cor <- topicCorr(stm_model)
-rownames(stm_cor$cor) <- colnames(stm_cor$cor) <- paste0("topic ", 1:K_final)
-
-clust_num <- 5
-
 make.dt(stm_model, meta=corpus$meta) %>% 
     select(grep("Topic", names(.))) %>% 
     cor() %>% 
-    pheatmap(display_numbers=T, cutree_rows=clust_num, cutree_cols=clust_num)
+    pheatmap(display_numbers=T, cutree_rows=k_val, cutree_cols=k_val)
+```
 
+## 6.3. Dendrogram & Dendrogram-based Cluster Plot
 
-stm_hc <- hclust(dist(scale(stm_cor$cor), method="euclidean"), "ward.D2")
-fviz_dend(stm_hc, k=clust_num, palette="Dark2", rect=T)
+```{r echo=FALSE}
 
-plot(topicCorr(stm_model,cutoff = 0.05), vertex.color = as.factor(cutree(stm_hc, k=clust_num)))
+k_val <- 5
 
-scale(stm_cor$cor) %>% kmeans(clust_num) %>% fviz_cluster(scale(stm_cor$cor))
+stm_cor <- topicCorr(stm_model, cutoff = -0.01)
+rownames(stm_cor$cor) <- colnames(stm_cor$cor) <- paste0("topic ", 1:K_final)
+
+normalized_cor <- scale(stm_cor$cor)
+
+stm_hc <- hclust(normalized_cor %>% dist(method="euclidean"), "ward.D2")
+fviz_dend(stm_hc, k=k_val, palette="Dark2", rect=T)
+
+plot(stm_cor, vertex.color = stm_hc %>% cutree(k=k_val) %>% as.factor)
+```
+
+### 6.4. K-meas based Cluster Plot
+
+```{r echo=FALSE}
+
+k_val <- 5
+
+normalized_cor %>% kmeans(k_val) %>% fviz_cluster(normalized_cor)
+
 ```
