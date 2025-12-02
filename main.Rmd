@@ -74,7 +74,7 @@ print("PREPROCESSING COMPLETE")
 
 ### 2.a. TDM/DTM
 
-```{r echo=FALSE}
+```{r echo=FALSE, warning=FALSE}
 
 TermDocumentMatrix(
   corpus,
@@ -156,7 +156,7 @@ top_terms_stm  # print DataFrame
 
 # 4. Search for optimum K
 
-```{r message=FALSE, include=FALSE, paged.print=TRUE}
+```{r echo=FALSE, include=True}
 
 candidates <- seq(from=10, to=30, by=1)
 
@@ -167,20 +167,17 @@ kresult <- searchK(
   K = candidates,
   seed = 42,
 )
-```
-
-```{r echo=False}
 
 plot(kresult)
 ```
 
-```{r include=FALSE}
+```{r echo=FALSE, message=FALSE}
 K_final <- 18
 ```
 
 # 5. Fit STM model
 
-```{r echo=FALSE}
+```{r echo=FALSE, fig.height=5, paged.print=TRUE}
 set.seed(42)
 
 stm_model <- stm(
@@ -189,7 +186,9 @@ stm_model <- stm(
   K = K_final,
   data = meta,
   max.em.its = 200,
-  init.type = "Spectral"
+  init.type = "Spectral",
+  verbose=TRUE,
+  reportevery=5
 )
 ```
 
