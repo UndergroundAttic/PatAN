@@ -6,20 +6,18 @@ output:
     keep_md: true
 ---
 
-```{powershell pythonsetup, include=False}
-python -m venv .venv
-./.venv/Scripts/activate.bat
-
-pip install -r requirements.txt
-pip freeze > requirements.txt
-```
-
-```{r renv Startup, echo=FALSE}
+```{r renv Startup, include=FALSE}
 renv::activate()
-renv::restore()
 ```
+
+```{r renv Restore, include=FALSE}
+renv::restore(prompt = FALSE)
+```
+
+# 0. Reset Memory and Re-import libraries
 
 ```{r R setup, warning=FALSE, include=FALSE}
+# 데이터를 모두 해제합니다.
 rm(list=ls())
 
 library("reticulate")
