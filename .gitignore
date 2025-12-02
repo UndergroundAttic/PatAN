@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+.ipynb_checkpoints
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+.Rproj.user
+
+renv/
+.RProfile
+.vscode/
+.Rhistory
+.RData
+*.Rproj
+
+# datasets
+.csv
+.json
