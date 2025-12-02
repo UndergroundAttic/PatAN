@@ -19,5 +19,5 @@ renv/
 *.Rproj
 
 # datasets
-.csv
-.json
+*.csv
+*.json
