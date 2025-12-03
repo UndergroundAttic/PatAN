@@ -28,7 +28,7 @@ install.packages(c("rmarkdown","knitr","renv"),prompt=FALSE)
 ```
 
   
-모든 패키지가 설치되고 나면, [main.rmd](main.rmd)의 첫 번째 셀(*`RMarkdown`에서는 "청크"라고 부릅니다.*)을 실행하여 R 가상환경을 활성화하고, R 엔진이 재시작될 때까지 기다리십시오.
+모든 패키지가 설치되고 나면, [main.rmd](main.rmd)의 첫 번째 코드 셀을 실행하여 R 가상환경을 활성화하고, R 엔진이 재시작될 때까지 기다리십시오.
 
 해당 청크는 다음과 같습니다:
 
