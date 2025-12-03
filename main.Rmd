@@ -66,7 +66,7 @@ pat <- pat_raw %>%
     #year           = applicationDate,
     #org_name       = applicantName,
   ) %>% 
-  pymod$preprocess_df(tagger_type="Okt",title_weight=1L,abstract_weight=1L)
+  pymod$preprocess_df(tagger_type="Hannanum",title_weight=3L,abstract_weight=2L)
 
 corpus <- Corpus(pat$processed_text %>% VectorSource)
 # build corpus
@@ -218,7 +218,7 @@ stm_cor$cor %>%
 
 ```{r echo=FALSE,warning=FALSE}
 
-k_val <- 4
+k_val <- 5
 
 stm_hc <- hclust(stm_cor$cor %>% dist(method="euclidean"), "ward.D2")
 fviz_dend(stm_hc, k=k_val, palette="Dark2", rect=T)
@@ -238,7 +238,7 @@ fviz_cluster(stm_cor$cor %>% kmeans(k_val), stm_cor$cor)
 
 # 7. Build Wordclouds
 
-## 7.1. Freq-based Wordclouds
+## 7.1. Topic Wordclouds
 
 ```{r echo=FALSE}
 
@@ -255,7 +255,7 @@ for (k in 1:K_final) {
 
   ord <- order(topic_beta, decreasing = TRUE)
 
-  top_n <- 50
+  top_n <- 30
   top_idx <- ord[1:top_n]
   
   words_k <- vocab_clean[top_idx]
@@ -266,39 +266,11 @@ for (k in 1:K_final) {
     words = words_k,
     freq = freq_k,
     max.words = top_n,
-    scale = c(4, 0.8),
-    random.order = FALSE
+    scale = c(2, 0.6),
+    random.order = FALSE,
   )
   
   title(paste("Topic", k, "Wordcloud"))
 }
 ```
 
-## 7.2. TF-IDF-based Wordclouds
-
-```{r}
-dtm_tfidf_mat <- dtm
-
-top_words <- labelTopics(stm_model, n = ncol(dtm_tfidf_matrix))
-
-beta_mat <- exp(stm_model$beta$logbeta[[1]])
-
-if (!exists("K_final")) {
-  K_final <- stm_model$settings$dim$K
-}
-
-for (k in 1:K_final) {
-  topic_beta <- beta_mat[k,]
-  topic_beta_sorted <- sort(topic_beta, decreasing = TRUE)
-  
-  wordcloud(
-    words= stm_model$vocab %>% strsplit("/") %>% sapply(\(x) x[1]),
-    freq = topic_beta_sorted,
-    max.words=50,
-    scale=c(4,0.8),
-    random.order=FALSE,
-  )
-  
-  title(paste("Topic",k,"Worldcloud"))
-}
-```
