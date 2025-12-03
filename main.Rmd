@@ -67,7 +67,7 @@ pat <- pat_raw %>%
   ) %>% 
   pymod$preprocess_df(tagger_type="Okt",title_weight=1L,abstract_weight=1L)
 
-corpus <- Corpus(VectorSource(pat$processed_text))
+corpus <- Corpus(pat$processed_text %>% VectorSource)
 # build corpus
 print("PREPROCESSING COMPLETE")
 ```
@@ -204,6 +204,8 @@ labelTopics(stm_model, topics = 1: K_final, n=10)
 ## 6.2. STM topicCorr Heatmap
 
 ```{r echo=FALSE}
+k_val <- 5
+
 make.dt(stm_model, meta=corpus$meta) %>% 
     select(grep("Topic", names(.))) %>% 
     cor() %>% 
@@ -212,7 +214,7 @@ make.dt(stm_model, meta=corpus$meta) %>%
 
 ## 6.3. Dendrogram & Dendrogram-based Cluster Plot
 
-```{r echo=FALSE}
+```{r echo=FALSE,warning=FALSE}
 
 k_val <- 5
 
@@ -227,7 +229,7 @@ fviz_dend(stm_hc, k=k_val, palette="Dark2", rect=T)
 plot(stm_cor, vertex.color = stm_hc %>% cutree(k=k_val) %>% as.factor)
 ```
 
-### 6.4. K-meas based Cluster Plot
+## 6.4. K-meas based Cluster Plot
 
 ```{r echo=FALSE}
 
