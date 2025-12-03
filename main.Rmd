@@ -148,7 +148,7 @@ top_idx <- (token_counts %>% names)[seq] %>% as.integer  # Indices of most occur
 
 top_terms_stm <- data.frame(
   term = vocab[top_idx],
-  n    = token_counts[seq_len(n_top)] %>% as.integer
+  n    = token_counts[seq] %>% as.integer
 )                                                        # make dataFrame 
 
 top_terms_stm  # print DataFrame
@@ -199,6 +199,9 @@ stm_model <- stm(
 ```{r echo=FALSE}
 plot(stm_model, type= "summary", text.cex = 0.8)
 labelTopics(stm_model, topics = 1: K_final, n=10)
+
+stm_cor <- topicCorr(stm_model, cutoff = -0.01)
+rownames(stm_cor$cor) <- colnames(stm_cor$cor) <- paste0("topic ", 1:K_final)
 ```
 
 ## 6.2. STM topicCorr Heatmap
@@ -206,24 +209,17 @@ labelTopics(stm_model, topics = 1: K_final, n=10)
 ```{r echo=FALSE}
 k_val <- 5
 
-make.dt(stm_model, meta=corpus$meta) %>% 
-    select(grep("Topic", names(.))) %>% 
-    cor() %>% 
-    pheatmap(display_numbers=T, cutree_rows=k_val, cutree_cols=k_val)
+stm_cor$cor %>% 
+    pheatmap(display_numbers=T, clustering_method ="ward.D2" ,cutree_rows=k_val, cutree_cols=k_val)
 ```
 
 ## 6.3. Dendrogram & Dendrogram-based Cluster Plot
 
 ```{r echo=FALSE,warning=FALSE}
 
-k_val <- 5
+k_val <- 4
 
-stm_cor <- topicCorr(stm_model, cutoff = -0.01)
-rownames(stm_cor$cor) <- colnames(stm_cor$cor) <- paste0("topic ", 1:K_final)
-
-normalized_cor <- scale(stm_cor$cor)
-
-stm_hc <- hclust(normalized_cor %>% dist(method="euclidean"), "ward.D2")
+stm_hc <- hclust(stm_cor$cor %>% dist(method="euclidean"), "ward.D2")
 fviz_dend(stm_hc, k=k_val, palette="Dark2", rect=T)
 
 plot(stm_cor, vertex.color = stm_hc %>% cutree(k=k_val) %>% as.factor)
@@ -233,8 +229,9 @@ plot(stm_cor, vertex.color = stm_hc %>% cutree(k=k_val) %>% as.factor)
 
 ```{r echo=FALSE}
 
-k_val <- 5
+k_val <- 4
 
-normalized_cor %>% kmeans(k_val) %>% fviz_cluster(normalized_cor)
+fviz_cluster(stm_cor$cor %>% kmeans(k_val), stm_cor$cor)
 
+```
 ```
