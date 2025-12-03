@@ -53,9 +53,6 @@ renv::restore(prompt = FALSE)
 이 청크는 [renv.lock](renv.lock)를 이용해 R 가상환경을 복원합니다.
 기록된 모든 패키지가 설치되었다면, 이제 다음으로 진행해도 좋습니다.
 
-# WARNING
-
-- 파이썬 모듈을 변경한 후에는 R 엔진을 재시작해야만 변경 사항이 반영됩니다.
 ## WARNINGS
 
 1. [`modules`](modules)폴더에 정의된 파이썬 모듈을 수정한 후 R에 반영하려면 R 엔진을 재시작해야 합니다.
