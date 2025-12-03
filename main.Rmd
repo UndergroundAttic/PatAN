@@ -248,18 +248,29 @@ if (!exists("K_final")) {
   K_final <- stm_model$settings$dim$K
 }
 
+vocab_clean <- sapply(strsplit(stm_model$vocab, "/"), \(x) x[1])
+
 for (k in 1:K_final) {
-  topic_beta <- beta_mat[k,] %>% sort(decreasing = TRUE)
+  topic_beta <- beta_mat[k, ]
+
+  ord <- order(topic_beta, decreasing = TRUE)
+
+  top_n <- 50
+  top_idx <- ord[1:top_n]
   
+  words_k <- vocab_clean[top_idx]
+  freq_k  <- topic_beta[top_idx]
+  
+  # 워드클라우드
   wordcloud(
-    words= stm_model$vocab %>% strsplit("/") %>% sapply(\(x) x[1]),
-    freq = topic_beta,
-    max.words=50,
-    scale=c(4,0.8),
-    random.order=FALSE,
+    words = words_k,
+    freq = freq_k,
+    max.words = top_n,
+    scale = c(4, 0.8),
+    random.order = FALSE
   )
   
-  title(paste("Topic",k,"Worldcloud"))
+  title(paste("Topic", k, "Wordcloud"))
 }
 ```
 
