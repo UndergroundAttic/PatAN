@@ -5117,6 +5117,36 @@
       "Maintainer": "Lionel Henry <lionel@posit.co>",
       "Repository": "CRAN"
     },
+    "wordcloud": {
+      "Package": "wordcloud",
+      "Version": "2.6",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "Word Clouds",
+      "Author": "Ian Fellows",
+      "Maintainer": "Ian Fellows <ian@fellstat.com>",
+      "Description": "Functionality to create pretty word clouds, visualize differences and similarity between documents, and avoid over-plotting in scatter plots with text.",
+      "License": "LGPL-2.1",
+      "LazyLoad": "yes",
+      "Depends": [
+        "methods",
+        "RColorBrewer"
+      ],
+      "Imports": [
+        "Rcpp (>= 0.9.4)"
+      ],
+      "Suggests": [
+        "tm (>= 0.6)",
+        "slam"
+      ],
+      "URL": "http://blog.fellstat.com/?cat=11 http://www.fellstat.com",
+      "LinkingTo": [
+        "Rcpp"
+      ],
+      "NeedsCompilation": "yes",
+      "Repository": "CRAN",
+      "Encoding": "UTF-8"
+    },
     "xfun": {
       "Package": "xfun",
       "Version": "0.54",

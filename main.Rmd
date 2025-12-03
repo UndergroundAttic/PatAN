@@ -29,6 +29,7 @@ library("stm")
 library("tm")
 library("pheatmap")
 library("factoextra")
+library("wordcloud")
 ```
 
 # 1. Import dataset
@@ -234,4 +235,59 @@ k_val <- 4
 fviz_cluster(stm_cor$cor %>% kmeans(k_val), stm_cor$cor)
 
 ```
+
+# 7. Build Wordclouds
+
+## 7.1. Freq-based Wordclouds
+
+```{r echo=FALSE}
+
+beta_mat <- exp(stm_model$beta$logbeta[[1]])
+
+if (!exists("K_final")) {
+  K_final <- stm_model$settings$dim$K
+}
+
+for (k in 1:K_final) {
+  topic_beta <- beta_mat[k,] %>% sort(decreasing = TRUE)
+  
+  wordcloud(
+    words= stm_model$vocab %>% strsplit("/") %>% sapply(\(x) x[1]),
+    freq = topic_beta,
+    max.words=50,
+    scale=c(4,0.8),
+    random.order=FALSE,
+  )
+  
+  title(paste("Topic",k,"Worldcloud"))
+}
+```
+
+## 7.2. TF-IDF-based Wordclouds
+
+```{r}
+dtm_tfidf_mat <- dtm
+
+top_words <- labelTopics(stm_model, n = ncol(dtm_tfidf_matrix))
+
+beta_mat <- exp(stm_model$beta$logbeta[[1]])
+
+if (!exists("K_final")) {
+  K_final <- stm_model$settings$dim$K
+}
+
+for (k in 1:K_final) {
+  topic_beta <- beta_mat[k,]
+  topic_beta_sorted <- sort(topic_beta, decreasing = TRUE)
+  
+  wordcloud(
+    words= stm_model$vocab %>% strsplit("/") %>% sapply(\(x) x[1]),
+    freq = topic_beta_sorted,
+    max.words=50,
+    scale=c(4,0.8),
+    random.order=FALSE,
+  )
+  
+  title(paste("Topic",k,"Worldcloud"))
+}
 ```
