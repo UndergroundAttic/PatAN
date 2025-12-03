@@ -99,8 +99,8 @@ def preprocess_df(
     def _wrap(*args):
         t, a, tw, aw = args
         return " ".join(
-            aw * preprocess_text(a, tagger_instance)
-            + tw * preprocess_text(t, tagger_instance)
+            aw * preprocess_text(a, tagger_instance),
+            tw * preprocess_text(t, tagger_instance),
         )
 
     df["processed_text"] = [
