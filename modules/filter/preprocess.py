@@ -10,6 +10,9 @@ from modules.utils import elapsed
 STOP_TAGS = {
     "Number",
     "Josa",
+    "Adjective",
+    "Adverb",
+    "Conjunction",
     "Verb",
     "JKS",
     "JKC",
@@ -25,6 +28,10 @@ STOP_TAGS = {
     "SS",
     "SE",
     "SO",
+    "E",
+    "J",
+    "P",
+    "X",
 }
 
 
@@ -32,7 +39,7 @@ def preprocess_text(text, tagger_instance: Union[Okt, Hannanum, Komoran]) -> lis
     """
     전처리 함수: 텍스트를 입력받아 명사 추출 및 필터링을 수행합니다.
     """
-    from .stopword import PATENT_STOPWORDS
+    from .stopword import PATENT_STOPWORDS, PATENT_STOPWORDS2
 
     text = re.sub(r"\([^)]*\)", "", str(text))
 
@@ -41,7 +48,7 @@ def preprocess_text(text, tagger_instance: Union[Okt, Hannanum, Komoran]) -> lis
 
     # 명사 추출
     if isinstance(tagger_instance, Okt):
-        tagged = tagger_instance.pos(text, stem=True)
+        tagged = tagger_instance.pos(text)
     else:
         tagged = tagger_instance.pos(text)
 
@@ -50,19 +57,13 @@ def preprocess_text(text, tagger_instance: Union[Okt, Hannanum, Komoran]) -> lis
     filtered_words = [
         "/".join((word, tag))
         for word, tag in tagged
-        if (tag not in STOP_TAGS) and (word not in PATENT_STOPWORDS) and len(word) > 1
+        if (tag not in STOP_TAGS)
+        and (word not in PATENT_STOPWORDS)
+        and len(word) > 1
+        and not word.isdigit()
     ]
 
-    taggedfilterset = set(filtered_words)
-
-    def _helper(item):
-        try:
-            taggedfilterset.remove(item)
-        except:
-            return False
-        return True
-
-    unique_filtered_words = [item for item in filtered_words if _helper(item)]
+    unique_filtered_words = list(dict.fromkeys(filtered_words))
     # TODO: 조사 제거, 일정 숫자마다 프린트
 
     return unique_filtered_words
