@@ -6,7 +6,7 @@ output:
     keep_md: true
 ---
 
-```{r renv Startup, include=FALSE}
+```{r renv Startup, eval=FALSE, include=FALSE}
 renv::activate()
 ```
 
@@ -30,22 +30,55 @@ library("tm")
 library("pheatmap")
 library("factoextra")
 library("wordcloud")
+library("rstudioapi")
+library("jsonlite")
+
+# Plot export helpers
+dataset_name <- tools::file_path_sans_ext(basename("data/한동수CPC6.csv"))
+plot_output_dir <- file.path("output", dataset_name)
+dir.create(plot_output_dir, recursive = TRUE, showWarnings = FALSE)
+
+plot_tracker <- new.env(parent = emptyenv())
+plot_tracker$count <- 0
+
+sanitize_label <- function(label) {
+  label <- gsub("[^0-9A-Za-z가-힣_\\-]+", "_", label)
+  label <- gsub("_+", "_", label)
+  label <- sub("^_+", "", label)
+  label <- sub("_+$", "", label)
+  if (label == "") label <- "plot"
+  label
+}
+
+save_plot <- function(label = "plot") {
+  if (is.null(dev.list())) {
+    message(sprintf("No active plot to save for label '%s'", label))
+    return(invisible(NULL))
+  }
+  last_plot <- recordPlot()
+  plot_tracker$count <- plot_tracker$count + 1
+  filename <- sprintf("%02d_%s.png", plot_tracker$count, sanitize_label(label))
+  filepath <- file.path(plot_output_dir, filename)
+  png(filename = filepath, width = 1600, height = 1200, res = 180)
+  replayPlot(last_plot)
+  dev.off()
+  message(sprintf("Saved plot: %s", filepath))
+}
 ```
 
 # 1. Import dataset
 
-```{r echo=FALSE}
+```{r eval=FALSE}
 
-rm(list=ls())
 list.files(path="data")
 
-CURRENT_DIR <- dirname(rstudioapi::getActiveDocumentContext()$path)
+CURRENT_DIR <- dirname(getActiveDocumentContext()$path)
 ```
 
 ```{r, echo=FALSE}
 
 pat_raw <- read.csv(
-  "data/산공_IPC.csv",
+  paste0("data/",dataset_name,".csv"),
   fileEncoding     = "UTF-8",
   stringsAsFactors = FALSE
 )
@@ -58,7 +91,7 @@ pat_raw <- read.csv(
 ```{r echo=FALSE}
 pymod<-import("modules")
 
-pat <- pat_raw %>%
+pat_preprocessed <- pat_raw %>%
   rename(
     id             = applicationNumber,
     title          = inventionTitle,
@@ -66,21 +99,61 @@ pat <- pat_raw %>%
     #year           = applicationDate,
     #org_name       = applicantName,
   ) %>% 
-  pymod$preprocess_df(tagger_type="Hannanum",title_weight=3L,abstract_weight=2L)
-
-corpus <- Corpus(pat$processed_text %>% VectorSource)
+  pymod$preprocess_df(tagger_type="okt",title_weight=1L,abstract_weight=1L)
+  
+corpus <- Corpus(pat_preprocessed$processed_text %>% VectorSource)
 # build corpus
 print("PREPROCESSING COMPLETE")
 ```
 
-### 2.a. TDM/DTM
+## 2.a. Merge with metadata
+
+```{r echo=FALSE}
+
+metadata_list <- fromJSON(paste0("data/",dataset_name,"_metadata.json"), simplifyVector = FALSE)
+
+app_ids <- pat_raw$applicationNumber %>% as.character
+match_indices <- match(app_ids, names(metadata_list))
+
+extract_field <- function(idx, field) {
+  entry <- metadata_list[[idx]]
+  entry[[field]]
+}
+
+# Primary applicant (first in list)
+pat_preprocessed$applicantName <- match_indices %>% 
+  sapply(\(x){extract_field(x,"applicantName")[[1]] %>% as.character})
+
+# All applicants (semicolon-separated)
+pat_preprocessed$applicantName_all <- match_indices %>%
+  sapply(\(x){extract_field(x,"applicantName") %>% paste(collapse=";")})
+
+# Application date (convert YYYYMMDD -> Date)
+pat_preprocessed$applicationDate <-match_indices %>% 
+  sapply(\(x){extract_field(x,"applicationDate")}) %>% as.Date(format="%Y%m%d")
+
+top_applicants <- pat_preprocessed$applicantName %>%
+  table() %>%
+  sort(decreasing = TRUE) %>%
+  names() %>%
+  head(10)
+
+pat <- pat_preprocessed %>% mutate(
+  applicantGroup = ifelse(applicantName %in% top_applicants, applicantName, "Other") %>% factor,
+  applicationYear = as.integer(format(applicationDate, "%Y")),
+)
+head(pat[, c("id", "applicantName")], 5)
+```
+
+### 2.b. TDM/DTM
 
 ```{r echo=FALSE, warning=FALSE}
 
-TermDocumentMatrix(
+tdm<-TermDocumentMatrix(
   corpus,
   control = list(weighting=weightTfIdf)
-) %>% inspect
+)
+tdm %>% inspect
 ```
 
 ```{r echo=FALSE, warning=FALSE}
@@ -94,7 +167,7 @@ TermDocumentMatrix(
 # 3. Use TextProcessor
 
 ```{r echo=FALSE}
-corpus <- textProcessor(
+proc <- textProcessor(
   documents = pat$processed_text,
   metadata = pat,
   lowercase= FALSE,
@@ -106,25 +179,26 @@ corpus <- textProcessor(
   wordLengths = c(1,Inf)
 )
 
-head(corpus$vocab,3)
+head(proc$vocab,3)
 ```
 
 ```{r}
 prep<-prepDocuments(
-  documents = corpus$documents,
-  vocab = corpus$vocab,
-  meta = corpus$meta,
+  documents = proc$documents,
+  vocab = proc$vocab,
+  meta = proc$meta,
 )
 plotRemoved(prep$documents, lower.thresh = seq(0, 100, by = 5))
+save_plot("documents_filtered")
 ```
 
 ```{r echo=FALSE}
 
 corpus<-prepDocuments(
-  documents = corpus$documents,
-  vocab = corpus$vocab,
-  meta = corpus$meta,
-  lower.thresh = 10
+  documents = proc$documents,
+  vocab = proc$vocab,
+  meta = proc$meta,
+  lower.thresh = 1
 )
 
 head(corpus$vocab,3)
@@ -138,28 +212,33 @@ meta <- corpus$meta
 
 ```{r echo=FALSE}
 
-token_counts <- unlist(docs) %>%                         # convert large list to vector
-  table %>%                                              # table of occurence
-  sort(decreasing = TRUE)                                # sort table
-
-n_top <- min(token_counts %>% length,30)                 # length of table, restricted to 30
-seq <- seq_len(n_top)                                    # a sequence of integer, 1 to n_top
-
-top_idx <- (token_counts %>% names)[seq] %>% as.integer  # Indices of most occurent tokens as INT
-
-top_terms_stm <- data.frame(
-  term = vocab[top_idx],
-  n    = token_counts[seq] %>% as.integer
-)                                                        # make dataFrame 
-
-top_terms_stm  # print DataFrame
+#dec_srt <- prep$wordcounts
+#dec_srt %>% sort(decreasing = TRUE)
+#top_freq  = head(dec_srt %>% sort(decreasing = TRUE),10)
+#
+#token_counts <- docs %>%
+#  unlist %>%                                             # convert large list to vector
+#  table %>%                                              # table of occurence
+#  sort(decreasing = TRUE)                                # sort table
+#
+#n_top <- min(token_counts %>% length,30)                 # length of table, restricted to 30
+#seq <- seq_len(n_top)                                    # a sequence of integer, 1 to n_top
+#
+#top_idx <- (token_counts %>% names)[seq] %>% as.integer  # Indices of most occurent tokens as INT
+#
+#top_terms_stm <- data.frame(
+#  term = vocab[top_idx],
+#  n    = token_counts[seq] %>% as.integer
+#)                                                        # make dataFrame 
+#
+#top_terms_stm  # print DataFrame
 ```
 
 # 4. Search for optimum K
 
 ```{r echo=FALSE, include=True}
 
-candidates <- seq(from=10, to=30, by=1)
+candidates <- seq(from=8, to=24, by=2)
 
 kresult <- searchK(
   documents = docs,
@@ -170,10 +249,11 @@ kresult <- searchK(
 )
 
 plot(kresult)
+save_plot("searchK")
 ```
 
 ```{r echo=FALSE, message=FALSE}
-K_final <- 18
+K_final <- 16
 ```
 
 # 5. Fit STM model
@@ -185,6 +265,7 @@ stm_model <- stm(
   documents = docs,
   vocab = vocab,
   K = K_final,
+  prevalence = ~ applicantGroup * applicationYear,
   data = meta,
   max.em.its = 200,
   init.type = "Spectral",
@@ -199,6 +280,7 @@ stm_model <- stm(
 
 ```{r echo=FALSE}
 plot(stm_model, type= "summary", text.cex = 0.8)
+save_plot("stm_summary")
 labelTopics(stm_model, topics = 1: K_final, n=10)
 
 stm_cor <- topicCorr(stm_model, cutoff = -0.01)
@@ -212,6 +294,7 @@ k_val <- 5
 
 stm_cor$cor %>% 
     pheatmap(display_numbers=T, clustering_method ="ward.D2" ,cutree_rows=k_val, cutree_cols=k_val)
+save_plot("topic_correlation_heatmap")
 ```
 
 ## 6.3. Dendrogram & Dendrogram-based Cluster Plot
@@ -222,18 +305,64 @@ k_val <- 5
 
 stm_hc <- hclust(stm_cor$cor %>% dist(method="euclidean"), "ward.D2")
 fviz_dend(stm_hc, k=k_val, palette="Dark2", rect=T)
+save_plot("stm_dendrogram")
 
 plot(stm_cor, vertex.color = stm_hc %>% cutree(k=k_val) %>% as.factor)
+save_plot("stm_topic_graph")
 ```
 
 ## 6.4. K-meas based Cluster Plot
 
-```{r echo=FALSE}
+```{r eval=FALSE,echo=FALSE}
 
 k_val <- 4
 
 fviz_cluster(stm_cor$cor %>% kmeans(k_val), stm_cor$cor)
+#save_plot("stm_kmeans_cluster")
 
+```
+
+## 6.5. Applicant-Year Interaction Effect
+
+```{r Applicant Year Interaction, echo=FALSE, fig.width=12, fig.height=8}
+if (exists("stm_model")) {
+  effect_model <- estimateEffect(
+    1:K_final ~ applicantGroup * applicationYear,
+    stmobj = stm_model,
+    metadata = meta,
+    uncertainty = "Global"
+  )
+
+  topics_to_plot <- seq_len(K_final)
+  target_applicants <- intersect(
+    levels(pat$applicantGroup),
+    c(top_applicants, "Other")
+  ) %>% unique()
+  #%>% head(3)
+
+  if (length(target_applicants) == 0) {
+    message("No applicant groups available for interaction plot.")
+  } else {
+    for (app in target_applicants) {
+      plot(
+        effect_model,
+        covariate = "applicationYear",
+        method = "continuous",
+        moderator = "applicantGroup",
+        moderator.value = app,
+        topics = topics_to_plot,
+        xlab = "Application Year",
+        ylab = "Expected Topic Prevalence",
+        main = paste("Applicant-Year Effect:", app),
+        printlegend = TRUE,
+        lwd = 3
+      )
+      #save_plot(paste0("interaction_", app))
+    }
+  }
+} else {
+  message("STM model not available; skipping interaction plot.")
+}
 ```
 
 # 7. Build Wordclouds
@@ -271,6 +400,245 @@ for (k in 1:K_final) {
   )
   
   title(paste("Topic", k, "Wordcloud"))
+  save_plot(sprintf("topic_wordcloud_%02d", k))
 }
 ```
 
+## 7.2. Overall Wordcloud
+
+```{r eval=FALSE}
+# 문서-토픽 비중(gamma)
+#gamma_df <- stm_model$theta %>% 
+#  as.data.frame() %>% 
+#  mutate(doc_id = 1:n())
+#
+#text_vec <- vapply(corpus, function(d) as.character(d), FUN.VALUE = character(1))
+#text_df <- tibble(doc_id = seq_along(text_vec), text = text_vec)
+#
+## 토큰화 + TF-IDF 계산
+#tfidf_df <- text_df %>%
+#  unnest_tokens(word, text) %>%
+#  count(doc_id, word, sort = TRUE) %>%
+#  bind_tf_idf(word, doc_id, n)
+#
+## 전체 문서 기준 TF-IDF 상위 단어 선택
+#top_terms <- tfidf_df %>%
+#  arrange(desc(tf_idf)) %>%
+#  slice_head(n = 100)
+#
+## 워드클라우드 생성
+#wordcloud(
+#  words = top_terms$word,
+#  freq = top_terms$tf_idf,
+#  max.words = 100,
+#  scale = c(3, 0.8),
+#  random.order = FALSE,
+#  colors=rainbow(length(top_terms$word))
+#)
+#save_plot("overall_wordcloud")
+```
+
+# 8. Top Applicants by Topic Analysis
+
+```{r Top Applicants Topic Analysis, echo=FALSE, fig.width=12, fig.height=8}
+# Get topic assignments for each document
+gamma_df <- stm_model$theta %>%
+  as.data.frame() %>%
+  mutate(doc_id = row_number())
+
+# Find dominant topic for each document
+topic_assignments <- gamma_df %>%
+  pivot_longer(cols = -doc_id, names_to = "topic", values_to = "gamma") %>%
+  group_by(doc_id) %>%
+  slice_max(gamma, n = 1) %>%
+  ungroup() %>%
+  mutate(topic = gsub("V", "Topic ", topic))
+
+# Merge with metadata to get applicant information
+if (exists("pat") && "applicantName" %in% names(pat)) {
+  doc_topic_applicant <- pat %>%
+    mutate(doc_id = row_number()) %>%
+    left_join(topic_assignments, by = "doc_id") %>%
+    filter(!is.na(applicantName))  # Remove rows with missing applicant names
+  
+  # Find top applicants
+  top_applicants <- doc_topic_applicant %>%
+    count(applicantName, sort = TRUE) %>%
+    slice_head(n = 10) %>%
+    pull(applicantName)
+  
+  # Analyze topic distribution for top applicants
+  applicant_topic_summary <- doc_topic_applicant %>%
+    filter(applicantName %in% top_applicants) %>%
+    count(applicantName, topic) %>%
+    group_by(applicantName) %>%
+    mutate(percentage = n / sum(n) * 100) %>%
+    ungroup()
+  
+  # Create visualization
+  top_applicants_plot <- ggplot(
+    applicant_topic_summary,
+    aes(x = reorder(applicantName, -n, sum), y = n, fill = topic)
+  ) +
+    geom_bar(stat = "identity", position = "stack") +
+    coord_flip() +
+    labs(
+      title = "Top Applicants by Topic Distribution",
+      x = "Applicant Name",
+      y = "Number of Patents",
+      fill = "Topic"
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "right",
+      axis.text.y = element_text(size = 10)
+    )
+
+  print(top_applicants_plot)
+  save_plot("top_applicants_topic_distribution")
+  
+  # Print summary table
+  summary_table <- applicant_topic_summary %>%
+    group_by(applicantName) %>%
+    summarise(total_patents = sum(n)) %>%
+    arrange(desc(total_patents))
+
+  print("Top 10 Most Active Applicants:")
+  print(summary_table)
+} else {
+  print("Warning: applicantName column not found in pat")
+  print("Available columns:")
+  if (exists("pat")) {
+    print(names(pat))
+  }
+}
+```
+
+# 9. Applicant Topic Profiles
+
+```{r Applicant Topic Profiles, echo=FALSE, fig.width=12, fig.height=8}
+if (exists("pat") && exists("stm_model")) {
+  # Long format for topic assignment
+  topic_long <- stm_model$theta %>%
+    as.data.frame() %>%
+    mutate(doc_id = row_number()) %>%
+    pivot_longer(-doc_id, names_to = "topic", values_to = "gamma")
+
+  dominant_topic <- topic_long %>%
+    group_by(doc_id) %>%
+    slice_max(gamma, n = 1, with_ties = FALSE) %>%
+    ungroup()
+
+  doc_topic_applicant <- pat %>%
+    mutate(doc_id = row_number()) %>%
+    left_join(dominant_topic, by = "doc_id") %>%
+    filter(!is.na(applicantName), !is.na(topic))
+
+  top_applicants <- doc_topic_applicant %>%
+    count(applicantName, sort = TRUE) %>%
+    slice_head(n = 10) %>%
+    pull(applicantName)
+
+  plot_data <- doc_topic_applicant %>%
+    filter(applicantName %in% top_applicants) %>%
+    count(applicantName, topic)
+
+  if (nrow(plot_data) == 0) {
+    message("No topic data available for selected applicants")
+  } else {
+    for (applicant in top_applicants) {
+      applicant_df <- plot_data %>% filter(applicantName == applicant)
+      if (nrow(applicant_df) == 0) next
+
+      applicant_plot <- ggplot(applicant_df, aes(x = topic, y = n, fill = topic)) +
+        geom_col(show.legend = FALSE) +
+        labs(
+          title = paste("Topic Distribution:", applicant),
+          x = "Topic",
+          y = "Patent Count"
+        ) +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+      print(applicant_plot)
+      save_plot(paste0("topic_profile_", applicant))
+    }
+  }
+} else {
+  message("Required data (pat, stm_model) not available.")
+}
+```
+
+# 10. Topic Volume by Application Year
+
+```{r Topic Volume by Year, echo=FALSE, fig.width=12, fig.height=8}
+if (exists("stm_model")) {
+  year_meta <- meta %>%
+    mutate(doc_id = row_number()) %>%
+    select(doc_id, applicationYear)
+
+  topic_long <- stm_model$theta %>%
+    as.data.frame() %>%
+    mutate(doc_id = row_number()) %>%
+    pivot_longer(-doc_id, names_to = "topic", values_to = "gamma")
+
+  dominant_topic <- topic_long %>%
+    group_by(doc_id) %>%
+    slice_max(gamma, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    mutate(topic = gsub("V", "Topic ", topic))
+
+  topic_year_df <- dominant_topic %>%
+    left_join(year_meta, by = "doc_id") %>%
+    filter(!is.na(applicationYear)) %>%
+    count(applicationYear, topic)
+
+  if (nrow(topic_year_df) == 0) {
+    message("No application year information available for plotting")
+  } else {
+    topic_year_plot <- ggplot(topic_year_df, aes(x = applicationYear, y = n, color = topic)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 1) +
+    labs(
+      title = "Topic Volume by Application Year",
+      x = "Application Year",
+      y = "Number of Patents",
+      color = "Topic"
+    ) +
+    theme_minimal()
+    
+    print(topic_year_plot)
+    save_plot("topic_volume_by_year")
+    
+    year_cols <- topic_year_df$applicationYear %>% unique() %>% sort() %>% as.character()
+
+    topic_year_pivot <- topic_year_df %>%
+      mutate(applicationYear = as.character(applicationYear)) %>%
+      pivot_wider(names_from = applicationYear, values_from = n, values_fill = 0) %>%
+      mutate(topic = factor(topic, levels = sort(unique(topic)))) %>%
+      arrange(topic)
+
+    topic_year_mat <- topic_year_pivot %>%
+      select(topic, all_of(year_cols))
+
+    topic_labels <- topic_year_mat$topic %>% as.character()
+    topic_year_mat <- topic_year_mat %>%
+      select(-topic) %>%
+      as.matrix()
+    rownames(topic_year_mat) <- topic_labels
+
+    pheatmap(
+      topic_year_mat,
+      cluster_rows = FALSE,
+      cluster_cols = FALSE,
+      angle_col = 45,
+      display_numbers = TRUE,
+      number_format="%d",
+      main = "Topic Volume by Application Year"
+    )
+    save_plot("topic_volume_by_year_heatmap")
+  }
+} else {
+  message("STM model not available; skipping topic-by-year plot.")
+}
+```
