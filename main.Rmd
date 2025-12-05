@@ -33,6 +33,7 @@ library("wordcloud")
 library("rstudioapi")
 library("jsonlite")
 
+pymod<-import("modules")
 # Plot export helpers
 dataset_name <- tools::file_path_sans_ext(basename("data/한동수CPC6.csv"))
 plot_output_dir <- file.path("output", dataset_name)
@@ -89,8 +90,6 @@ pat_raw <- read.csv(
 이 청크에서 파이썬의 사전 정의된 모듈을 Import하고, 데이터프레임으로 전처리합니다.
 
 ```{r echo=FALSE}
-pymod<-import("modules")
-
 pat_preprocessed <- pat_raw %>%
   rename(
     id             = applicationNumber,
@@ -283,13 +282,14 @@ plot(stm_model, type= "summary", text.cex = 0.8)
 save_plot("stm_summary")
 labelTopics(stm_model, topics = 1: K_final, n=10)
 
-stm_cor <- topicCorr(stm_model, cutoff = -0.01)
-rownames(stm_cor$cor) <- colnames(stm_cor$cor) <- paste0("topic ", 1:K_final)
 ```
 
 ## 6.2. STM topicCorr Heatmap
 
 ```{r echo=FALSE}
+stm_cor <- topicCorr(stm_model, cutoff = -0.01)
+rownames(stm_cor$cor) <- colnames(stm_cor$cor) <- paste0("topic ", 1:K_final)
+
 k_val <- 5
 
 stm_cor$cor %>% 
@@ -641,4 +641,38 @@ if (exists("stm_model")) {
 } else {
   message("STM model not available; skipping topic-by-year plot.")
 }
+```
+
+# 11. Plot Radar-chart via Python and export.
+
+```{r fig.height=10}
+# [R Code] 파이썬으로 보낼 데이터 준비 (유사도 정렬)
+
+# 1. 덴드로그램 순서 가져오기 (이미 hc가 있다고 가정)
+# hc <- hclust(dist(scale(model_20$beta$logbeta[[1]])), method="ward.D2")
+ordered_indices <- stm_hc$order  # 유사한 것끼리 뭉친 순서
+
+# 2. 토픽 비중 및 라벨 준비
+topic_props <- colMeans(stm_model$theta)
+# 라벨은 아까 만든 AI 요약이나 FREX 단어를 씁니다 (여기선 Topic 번호+주요단어)
+labels <- labelTopics(stm_model, n=3)$frex
+topic_labels <- apply(labels, 1, paste, collapse="/")
+topic_labels <- paste0("T", 1:K_final, "\n", topic_labels) # T1\n단어/단어/단어
+
+# 3. 데이터프레임 생성 (순서대로 정렬!)
+df_radar <- data.frame(
+  Topic_ID = paste0("Topic ", 1:K_final),
+  Proportion = topic_props,
+  Label = topic_labels,
+  Order = 1:K_final # 원래 번호
+)
+
+# ★ 핵심: 덴드로그램 순서대로 행을 재배치합니다.
+df_radar <- df_radar[ordered_indices, ]
+
+radar_plot_path <- file.path(plot_output_dir, "topic_radar_chart.png")
+pymod$radar_chart(df_radar, radar_plot_path)
+# 4. 저장
+#write.csv(df_radar, paste0("radar/",dataset_name,".csv"), row.names = FALSE)
+#cat("레이더 차트용 데이터 저장 완료!")
 ```
