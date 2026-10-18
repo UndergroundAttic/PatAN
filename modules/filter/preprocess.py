@@ -48,19 +48,18 @@ def preprocess_text(text, tagger_instance: Union[Okt, Hannanum, Komoran]) -> lis
 
     # 명사 추출
     if isinstance(tagger_instance, Okt):
-        tagged = tagger_instance.pos(text)
+        tagged = tagger_instance.nouns(text)
     else:
         tagged = tagger_instance.pos(text)
 
     # 필터링: 한 글자 단어 제거, 불용어 제거, 숫자만 있는 단어 제거, 순수 영문자 제거
 
     filtered_words = [
-        "/".join((word, tag))
-        for word, tag in tagged
-        if (tag not in STOP_TAGS)
-        and (word not in PATENT_STOPWORDS)
-        and len(word) > 1
-        and not word.isdigit()
+        word
+        # "/".join((word, tag))
+        for word in tagged
+        # if (tag not in STOP_TAGS)and
+        if (word not in PATENT_STOPWORDS2) and len(word) > 1 and not word.isdigit()
     ]
 
     unique_filtered_words = list(dict.fromkeys(filtered_words))
