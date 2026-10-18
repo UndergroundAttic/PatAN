@@ -16,9 +16,9 @@ renv::restore(prompt = FALSE)
 
 # 0. Reset Memory and Re-import libraries
 
-```{r R setup, warning=FALSE, include=FALSE}
+```{r R setup, eval=FALSE,warning=FALSE, include=FALSE}
 # 데이터를 모두 해제합니다.
-rm(list=ls())
+#rm(list=ls())
 
 library("reticulate")
 library("dplyr")
@@ -35,7 +35,7 @@ library("jsonlite")
 
 pymod<-import("modules")
 # Plot export helpers
-dataset_name <- tools::file_path_sans_ext(basename("data/한동수CPC6.csv"))
+dataset_name <- tools::file_path_sans_ext(basename("data/processed11.csv"))
 plot_output_dir <- file.path("output", dataset_name)
 dir.create(plot_output_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -98,7 +98,7 @@ pat_preprocessed <- pat_raw %>%
     #year           = applicationDate,
     #org_name       = applicantName,
   ) %>% 
-  pymod$preprocess_df(tagger_type="okt",title_weight=1L,abstract_weight=1L)
+  pymod$preprocess_df(tagger_type="okt",title_weight=3L,abstract_weight=1L)
   
 corpus <- Corpus(pat_preprocessed$processed_text %>% VectorSource)
 # build corpus
@@ -112,7 +112,7 @@ print("PREPROCESSING COMPLETE")
 metadata_list <- fromJSON(paste0("data/",dataset_name,"_metadata.json"), simplifyVector = FALSE)
 
 app_ids <- pat_raw$applicationNumber %>% as.character
-match_indices <- match(app_ids, names(metadata_list))
+match_indices <- match(app_ids, names(metadata_list)) %>% as.numeric
 
 extract_field <- function(idx, field) {
   entry <- metadata_list[[idx]]
@@ -137,8 +137,9 @@ top_applicants <- pat_preprocessed$applicantName %>%
   names() %>%
   head(10)
 
+#ifelse(applicantName %in% top_applicants, applicantName, "Other")
 pat <- pat_preprocessed %>% mutate(
-  applicantGroup = ifelse(applicantName %in% top_applicants, applicantName, "Other") %>% factor,
+  applicantGroup = orgType %>% factor %>% relevel(ref="individual"),
   applicationYear = as.integer(format(applicationDate, "%Y")),
 )
 head(pat[, c("id", "applicantName")], 5)
@@ -235,7 +236,7 @@ meta <- corpus$meta
 
 # 4. Search for optimum K
 
-```{r echo=FALSE, include=True}
+```{r eval=FALSE, echo=FALSE, include=True}
 
 candidates <- seq(from=8, to=24, by=2)
 
@@ -252,7 +253,7 @@ save_plot("searchK")
 ```
 
 ```{r echo=FALSE, message=FALSE}
-K_final <- 16
+K_final <- 14
 ```
 
 # 5. Fit STM model
@@ -266,10 +267,11 @@ stm_model <- stm(
   K = K_final,
   prevalence = ~ applicantGroup * applicationYear,
   data = meta,
-  max.em.its = 200,
+  max.em.its = 10000,
   init.type = "Spectral",
   verbose=TRUE,
-  reportevery=5
+  reportevery=5,
+  gamma.prior = 'L1'
 )
 ```
 
@@ -282,6 +284,32 @@ plot(stm_model, type= "summary", text.cex = 0.8)
 save_plot("stm_summary")
 labelTopics(stm_model, topics = 1: K_final, n=10)
 
+```
+
+## 6.1.1. Topic Share Summary Export
+
+```{r Topic Share Summary, echo=FALSE}
+if (exists("stm_model")) {
+  topic_props <- colMeans(stm_model$theta)
+  topic_pct <- round(topic_props * 100, 3)
+
+  frex_matrix <- labelTopics(stm_model)$frex
+  frex_labels <- apply(frex_matrix, 1, paste, collapse = ", ")
+
+  topic_share_df <- data.frame(
+    Topic = seq_along(topic_props),
+    Share_Pct = topic_pct,
+    FREX = frex_labels
+  )
+
+  print(topic_share_df)
+
+  topic_share_csv <- file.path(plot_output_dir, "topic_share_summary.csv")
+  write.csv(topic_share_df, topic_share_csv, row.names = FALSE)
+  message(sprintf("Saved topic share summary: %s", topic_share_csv))
+} else {
+  message("STM model not available; skipping topic share export.")
+}
 ```
 
 ## 6.2. STM topicCorr Heatmap
@@ -334,10 +362,11 @@ if (exists("stm_model")) {
   )
 
   topics_to_plot <- seq_len(K_final)
-  target_applicants <- intersect(
-    levels(pat$applicantGroup),
-    c(top_applicants, "Other")
-  ) %>% unique()
+  target_applicants <- levels(pat$applicantGroup) %>% unique()
+  #  intersect(
+  #  levels(pat$applicantGroup),
+  #  c(top_applicants, "Other")
+  #) %>% unique()
   #%>% head(3)
 
   if (length(target_applicants) == 0) {
@@ -362,6 +391,37 @@ if (exists("stm_model")) {
   }
 } else {
   message("STM model not available; skipping interaction plot.")
+}
+```
+
+## 6.6. STM Prevalence Coefficients by Topic
+
+```{r STM Prevalence Coefficients, echo=FALSE}
+if (exists("stm_model") && exists("effect_model")) {
+  effect_summary <- summary(effect_model)
+
+  all_coef_list <- list()
+  for (topic_idx in seq_along(effect_summary$tables)) {
+    coef_table <- effect_summary$tables[[topic_idx]]
+    coef_df <- data.frame(
+      Topic = topic_idx,
+      Term = rownames(coef_table),
+      Estimate = coef_table[, "Estimate"],
+      StdError = coef_table[, "Std. Error"],
+      tValue = coef_table[, "t value"],
+      pValue = coef_table[, "Pr(>|t|)"],
+      row.names = NULL
+    )
+    all_coef_list[[topic_idx]] <- coef_df
+    print(coef_df)
+  }
+
+  all_coef_df <- do.call(rbind, all_coef_list)
+  coef_csv_path <- file.path(plot_output_dir, "stm_prevalence_coefficients.csv")
+  write.csv(all_coef_df, coef_csv_path, row.names = FALSE)
+  message(sprintf("Saved coefficients: %s", coef_csv_path))
+} else {
+  message("STM model or effect_model not available; skipping coefficient display.")
 }
 ```
 
@@ -516,6 +576,62 @@ if (exists("pat") && "applicantName" %in% names(pat)) {
 
 # 9. Applicant Topic Profiles
 
+## 9.1. Top Patents per Topic
+
+```{r Topic Patent Listings, echo=FALSE}
+if (exists("stm_model") && exists("pat")) {
+  top_n_docs <- 3L
+
+  topic_label_matrix <- labelTopics(stm_model, n = 3)$frex
+  topic_titles <- apply(topic_label_matrix, 1, paste, collapse = ", ")
+
+  doc_meta <- pat %>%
+    mutate(doc_id = row_number()) %>%
+    select(doc_id, Title = title)
+
+  topic_doc_map <- stm_model$theta %>%
+    as.data.frame() %>%
+    mutate(doc_id = row_number()) %>%
+    pivot_longer(-doc_id, names_to = "topic", values_to = "gamma") %>%
+    mutate(topic_num = gsub("[^0-9]", "", topic) %>% as.integer()) %>%
+    group_by(topic_num) %>%
+    arrange(desc(gamma)) %>%
+    slice_head(n = top_n_docs) %>%
+    ungroup() %>%
+    left_join(doc_meta, by = "doc_id")
+
+  if (nrow(topic_doc_map) == 0) {
+    message("No topic assignments available for listing")
+  } else {
+    for (topic_id in sort(unique(topic_doc_map$topic_num))) {
+      topic_df <- topic_doc_map %>%
+        filter(topic_num == topic_id)
+
+      topic_heading <- paste0(
+        "Topic ", topic_id,
+        if (!is.null(topic_titles) && topic_id <= length(topic_titles))
+          paste0(" (", topic_titles[topic_id], ")")
+        else
+          ""
+      )
+
+      cat(sprintf("#### %s\n", topic_heading))
+      titles <- topic_df$Title
+      if (length(titles) == 0) {
+        cat("(No documents found)\n\n")
+      } else {
+        for (idx in seq_along(titles)) {
+          cat(sprintf("%d. %s\n", idx, titles[[idx]]))
+        }
+        cat("\n")
+      }
+    }
+  }
+} else {
+  message("Required data (pat, stm_model) not available.")
+}
+```
+
 ```{r Applicant Topic Profiles, echo=FALSE, fig.width=12, fig.height=8}
 if (exists("pat") && exists("stm_model")) {
   # Long format for topic assignment
@@ -546,6 +662,64 @@ if (exists("pat") && exists("stm_model")) {
   if (nrow(plot_data) == 0) {
     message("No topic data available for selected applicants")
   } else {
+    topic_levels <- plot_data$topic %>% unique() %>% sort()
+    heatmap_matrix <- plot_data %>%
+      mutate(
+        applicantName = factor(applicantName, levels = top_applicants),
+        topic = factor(topic, levels = topic_levels)
+      ) %>%
+      pivot_wider(names_from = applicantName, values_from = n, values_fill = 0) %>%
+      arrange(topic)
+
+    hm_topics <- heatmap_matrix$topic %>% as.character()
+    hm_mat <- heatmap_matrix %>%
+      select(-topic) %>%
+      as.matrix()
+    rownames(hm_mat) <- hm_topics
+
+    pheatmap(
+      hm_mat,
+      cluster_rows = FALSE,
+      cluster_cols = FALSE,
+      display_numbers = TRUE,
+      number_format = "%d",
+      main = "출원인별 등록 특허 수",
+      angle_col="315"
+    )
+    save_plot("applicant_topic_heatmap")
+
+    corp_plot_data <- doc_topic_applicant %>%
+      filter(orgType == "firm", applicantName %in% top_applicants) %>%
+      count(applicantName, topic)
+
+    if (nrow(corp_plot_data) > 0) {
+      corp_topics <- corp_plot_data$topic %>% unique() %>% sort()
+      corp_heatmap <- corp_plot_data %>%
+        mutate(
+          applicantName = factor(applicantName, levels = top_applicants[top_applicants %in% applicantName]),
+          topic = factor(topic, levels = corp_topics)
+        ) %>%
+        pivot_wider(names_from = applicantName, values_from = n, values_fill = 0) %>%
+        arrange(topic)
+
+      corp_topic_labels <- corp_heatmap$topic %>% as.character()
+      corp_mat <- corp_heatmap %>% select(-topic) %>% as.matrix()
+      rownames(corp_mat) <- corp_topic_labels
+
+      pheatmap(
+        corp_mat,
+        cluster_rows = FALSE,
+        cluster_cols = FALSE,
+        display_numbers = TRUE,
+        number_format = "%d",
+        main = "기업별 등록 특허 수",
+        angle_col = "315"
+      )
+      save_plot("applicant_topic_heatmap_corp")
+    } else {
+      message("No 기업 applicants available for heatmap")
+    }
+
     for (applicant in top_applicants) {
       applicant_df <- plot_data %>% filter(applicantName == applicant)
       if (nrow(applicant_df) == 0) next
@@ -553,7 +727,7 @@ if (exists("pat") && exists("stm_model")) {
       applicant_plot <- ggplot(applicant_df, aes(x = topic, y = n, fill = topic)) +
         geom_col(show.legend = FALSE) +
         labs(
-          title = paste("Topic Distribution:", applicant),
+          title = paste("토픽 분포:", applicant),
           x = "Topic",
           y = "Patent Count"
         ) +
@@ -570,6 +744,33 @@ if (exists("pat") && exists("stm_model")) {
 ```
 
 # 10. Topic Volume by Application Year
+
+## 10.1. Overall Topic Share Radar Chart
+
+```{r Overall Topic Radar, echo=FALSE, fig.height=6}
+if (exists("stm_model") && exists("stm_hc")) {
+  ordered_indices <- stm_hc$order
+
+  topic_labels <- paste0("T", 1:K_final)
+
+  topic_props <- colMeans(stm_model$theta)
+
+  overall_radar_df <- data.frame(
+    orgType = "Overall",
+    Topic_ID = paste0("Topic ", seq_along(topic_props)),
+    Proportion = topic_props,
+    Label = topic_labels,
+    Order = match(seq_along(topic_props), ordered_indices)
+  ) %>%
+    filter(!is.na(Order)) %>%
+    arrange(Order)
+
+  overall_radar_path <- file.path(plot_output_dir, "overall_topic_radar.png")
+  pymod$radar_chart(overall_radar_df, overall_radar_path)
+} else {
+  message("STM model or stm_hc not available; skipping overall radar chart.")
+}
+```
 
 ```{r Topic Volume by Year, echo=FALSE, fig.width=12, fig.height=8}
 if (exists("stm_model")) {
@@ -591,30 +792,34 @@ if (exists("stm_model")) {
   topic_year_df <- dominant_topic %>%
     left_join(year_meta, by = "doc_id") %>%
     filter(!is.na(applicationYear)) %>%
-    count(applicationYear, topic)
+    count(applicationYear, topic) %>%
+    group_by(applicationYear) %>%
+    mutate(pct = n / sum(n) * 100) %>%
+    ungroup()
 
   if (nrow(topic_year_df) == 0) {
     message("No application year information available for plotting")
   } else {
-    topic_year_plot <- ggplot(topic_year_df, aes(x = applicationYear, y = n, color = topic)) +
+    topic_year_plot <- ggplot(topic_year_df, aes(x = applicationYear, y = pct, color = topic)) +
     geom_line(linewidth = 1) +
     geom_point(size = 1) +
     labs(
-      title = "Topic Volume by Application Year",
+      title = "Topic Share by Application Year",
       x = "Application Year",
-      y = "Number of Patents",
+      y = "Topic Share (%)",
       color = "Topic"
     ) +
     theme_minimal()
     
     print(topic_year_plot)
-    save_plot("topic_volume_by_year")
+    save_plot("topic_share_by_year")
     
     year_cols <- topic_year_df$applicationYear %>% unique() %>% sort() %>% as.character()
 
     topic_year_pivot <- topic_year_df %>%
       mutate(applicationYear = as.character(applicationYear)) %>%
-      pivot_wider(names_from = applicationYear, values_from = n, values_fill = 0) %>%
+      select(-n) %>%
+      pivot_wider(names_from = applicationYear, values_from = pct, values_fill = 0) %>%
       mutate(topic = factor(topic, levels = sort(unique(topic)))) %>%
       arrange(topic)
 
@@ -633,10 +838,10 @@ if (exists("stm_model")) {
       cluster_cols = FALSE,
       angle_col = 45,
       display_numbers = TRUE,
-      number_format="%d",
-      main = "Topic Volume by Application Year"
+      number_format="%.1f",
+      main = "등록년별 토픽 비율 (%)"
     )
-    save_plot("topic_volume_by_year_heatmap")
+    save_plot("topic_share_by_year_heatmap")
   }
 } else {
   message("STM model not available; skipping topic-by-year plot.")
@@ -645,33 +850,71 @@ if (exists("stm_model")) {
 
 # 11. Plot Radar-chart via Python and export.
 
-```{r fig.height=10}
+```{r fig.height=6}
 # [R Code] 파이썬으로 보낼 데이터 준비 (유사도 정렬)
 
 # 1. 덴드로그램 순서 가져오기 (이미 hc가 있다고 가정)
 # hc <- hclust(dist(scale(model_20$beta$logbeta[[1]])), method="ward.D2")
 ordered_indices <- stm_hc$order  # 유사한 것끼리 뭉친 순서
 
-# 2. 토픽 비중 및 라벨 준비
-topic_props <- colMeans(stm_model$theta)
-# 라벨은 아까 만든 AI 요약이나 FREX 단어를 씁니다 (여기선 Topic 번호+주요단어)
-labels <- labelTopics(stm_model, n=3)$frex
-topic_labels <- apply(labels, 1, paste, collapse="/")
-topic_labels <- paste0("T", 1:K_final, "\n", topic_labels) # T1\n단어/단어/단어
+# 2. 토픽 라벨 준비
+labels <- labelTopics(stm_model, n = 3)$frex
+topic_labels <- apply(labels, 1, paste, collapse = "/")
+topic_labels <- paste0("T", 1:K_final)
 
-# 3. 데이터프레임 생성 (순서대로 정렬!)
-df_radar <- data.frame(
-  Topic_ID = paste0("Topic ", 1:K_final),
-  Proportion = topic_props,
-  Label = topic_labels,
-  Order = 1:K_final # 원래 번호
-)
+# 3. orgType별 토픽 비중 계산
+theta_df <- stm_model$theta %>%
+  as.data.frame() %>%
+  mutate(doc_id = row_number())
 
-# ★ 핵심: 덴드로그램 순서대로 행을 재배치합니다.
-df_radar <- df_radar[ordered_indices, ]
+  org_meta <- meta %>%
+    mutate(doc_id = row_number()) %>%
+    select(doc_id, orgType)
+  
+  theta_by_org <- theta_df %>%
+    left_join(org_meta, by = "doc_id") %>%
+    filter(!is.na(orgType)) %>%
+    group_by(orgType) %>%
+    summarise(across(starts_with("V"), ~ mean(.x, na.rm = TRUE)), .groups = "drop")
 
-radar_plot_path <- file.path(plot_output_dir, "topic_radar_chart.png")
-pymod$radar_chart(df_radar, radar_plot_path)
+if (nrow(theta_by_org) == 0) {
+  message("orgType 정보가 없어 레이더 차트를 건너뜁니다.")
+} else {
+  org_targets <- org_meta %>%
+    count(orgType, sort = TRUE) %>%
+    filter(!is.na(orgType)) %>%
+    slice_head(n = 4) %>%
+    pull(orgType)
+
+  if (length(org_targets) == 0) {
+    message("유효한 orgType이 없어 레이더 차트를 건너뜁니다.")
+  } else {
+    theta_by_org <- theta_by_org %>%
+      filter(orgType %in% org_targets)
+
+    topic_cols <- theta_by_org %>%
+      select(starts_with("V")) %>%
+      colnames()
+
+    topic_long <- theta_by_org %>%
+      pivot_longer(cols = all_of(topic_cols), names_to = "topic_col", values_to = "Proportion") %>%
+      mutate(
+        Topic_Index = gsub("[^0-9]", "", topic_col) %>% as.integer(),
+        Topic_ID = paste0("Topic ", Topic_Index),
+        Label = topic_labels[Topic_Index],
+        Order = match(Topic_Index, ordered_indices)
+      ) %>%
+      filter(!is.na(Order)) %>%
+      arrange(factor(orgType, levels = org_targets), Order)
+
+    df_radar <- topic_long %>%
+      select(orgType, Topic_ID, Proportion, Label, Order)
+    df_radar$orgType <- as.character(df_radar$orgType)
+
+    radar_plot_path <- file.path(plot_output_dir, "topic_radar_chart.png")
+    pymod$radar_chart(df_radar, radar_plot_path)
+  }
+}
 # 4. 저장
 #write.csv(df_radar, paste0("radar/",dataset_name,".csv"), row.names = FALSE)
 #cat("레이더 차트용 데이터 저장 완료!")
